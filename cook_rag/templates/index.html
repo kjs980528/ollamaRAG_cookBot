@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>쿡봇(CookBot) - 스마트 레시피 셰프</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Marked.js for Markdown Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cook: {
+              50: '#fff7ed',
+              100: '#ffedd5',
+              200: '#fed7aa',
+              500: '#f97316',
+              600: '#ea580c',
+              700: '#c2410c',
+              800: '#9a3412',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Markdown Styling inside chat */
+    .chat-markdown h1 { font-size: 1.35rem; font-weight: 700; margin: 0.8rem 0 0.4rem; color: #1e293b; }
+    .chat-markdown h2 { font-size: 1.2rem; font-weight: 700; margin: 0.7rem 0 0.3rem; color: #c2410c; }
+    .chat-markdown h3 { font-size: 1.05rem; font-weight: 600; margin: 0.5rem 0 0.2rem; color: #334155; }
+    .chat-markdown p { margin-bottom: 0.5rem; line-height: 1.6; }
+    .chat-markdown ul { list-style-type: disc; margin-left: 1.4rem; margin-bottom: 0.5rem; }
+    .chat-markdown ol { list-style-type: decimal; margin-left: 1.4rem; margin-bottom: 0.5rem; }
+    .chat-markdown li { margin-bottom: 0.25rem; }
+    .chat-markdown blockquote { border-left: 4px solid #ea580c; padding-left: 0.8rem; color: #64748b; margin: 0.5rem 0; font-style: italic; }
+    .chat-markdown strong { color: #0f172a; font-weight: 600; }
+    .chat-markdown img { max-width: 100%; max-height: 320px; object-fit: cover; border-radius: 0.75rem; margin: 0.6rem 0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); cursor: pointer; transition: transform 0.2s; }
+    .chat-markdown img:hover { transform: scale(1.02); }
+    .chat-markdown table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+    .chat-markdown th, .chat-markdown td { border: 1px solid #e2e8f0; padding: 0.4rem 0.6rem; text-align: left; }
+    .chat-markdown th { background: #f8fafc; font-weight: 600; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 flex h-screen overflow-hidden font-sans">
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="w-80 bg-white border-r border-slate-200 flex flex-col justify-between flex-shrink-0 transition-all duration-300 hidden md:flex z-20">
+    <!-- Header -->
+    <div class="p-5 border-b border-slate-100">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cook-600 to-amber-500 flex items-center justify-center text-white shadow-md shadow-cook-500/20">
+          <i class="fa-solid fa-utensils text-lg"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg text-slate-800 tracking-tight">쿡봇 (CookBot)</h1>
+          <p class="text-xs text-slate-500 flex items-center gap-1.5 font-medium">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Ollama qwen3:8b 활성화
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content: Recipe Books & Recommendations -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-5">
+      <!-- Quick Info Box -->
+      <div class="bg-cook-50 border border-cook-200/70 rounded-xl p-3.5 text-xs text-cook-800 leading-relaxed shadow-sm">
+        <p class="font-semibold flex items-center gap-1.5 mb-1 text-cook-700">
+          <i class="fa-solid fa-circle-info"></i> RAG 요리 도우미
+        </p>
+        <span class="text-slate-600">등록된 레시피북 PDF에서 재료, 조리 순서, <strong>실제 요리 사진</strong>을 찾아 똑똑하게 알려드립니다.</span>
+      </div>
+
+      <!-- PDF Library -->
+      <div>
+        <div class="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+          <span>등록된 레시피북 ({{ pdf_files|length }}권)</span>
+          <button id="syncBtn" onclick="triggerSync()" title="새 요리책 PDF 자동 동기화 및 임베딩 갱신" class="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-cook-700 bg-cook-100 hover:bg-cook-200 border border-cook-300/60 rounded-lg transition shadow-xs">
+            <i id="syncIcon" class="fa-solid fa-arrows-rotate"></i>
+            <span>동기화</span>
+          </button>
+        </div>
+        <div class="space-y-2">
+          {% for pdf in pdf_files %}
+          <div class="p-2.5 rounded-lg border border-slate-200 bg-white hover:border-cook-500/50 hover:bg-slate-50 transition group cursor-pointer" onclick="showPdfInfo('{{ pdf.name }}', {{ pdf.pages }}, {{ pdf.size_mb }})">
+            <div class="flex items-start gap-2.5">
+              <i class="fa-solid fa-file-pdf text-red-500 text-lg mt-0.5"></i>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-semibold text-slate-700 truncate group-hover:text-cook-600" title="{{ pdf.name }}">{{ pdf.name }}</p>
+                <p class="text-[11px] text-slate-400">{{ pdf.pages }}페이지 · {{ pdf.size_mb }}MB</p>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Suggested Prompts -->
+      <div>
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+          <span>추천 요리 질문</span>
+          <i class="fa-solid fa-lightbulb"></i>
+        </div>
+        <div class="space-y-1.5">
+          <button onclick="sendQuickPrompt('김 주먹밥 만드는 방법과 필요한 재료를 사진과 함께 알려줘')" class="w-full text-left text-xs p-2 rounded-lg bg-slate-100 hover:bg-cook-100/70 text-slate-700 hover:text-cook-800 transition flex items-center gap-2">
+            <span>🍙</span>
+            <span class="truncate">김 주먹밥 만드는 법</span>
+          </button>
+          <button onclick="sendQuickPrompt('얼큰한 김치찌개 맛있게 끓이는 순서와 꿀팁을 알려줘')" class="w-full text-left text-xs p-2 rounded-lg bg-slate-100 hover:bg-cook-100/70 text-slate-700 hover:text-cook-800 transition flex items-center gap-2">
+            <span>🍲</span>
+            <span class="truncate">얼큰한 김치찌개 황금레시피</span>
+          </button>
+          <button onclick="sendQuickPrompt('연두부 샐러드 재료와 소스 만드는 방법 알려줘')" class="w-full text-left text-xs p-2 rounded-lg bg-slate-100 hover:bg-cook-100/70 text-slate-700 hover:text-cook-800 transition flex items-center gap-2">
+            <span>🥗</span>
+            <span class="truncate">연두부 샐러드 & 특제 소스</span>
+          </button>
+          <button onclick="sendQuickPrompt('참치마요 덮밥 레시피와 요리 사진 보여줘')" class="w-full text-left text-xs p-2 rounded-lg bg-slate-100 hover:bg-cook-100/70 text-slate-700 hover:text-cook-800 transition flex items-center gap-2">
+            <span>🍛</span>
+            <span class="truncate">참치마요 덮밥 만들기</span>
+          </button>
+          <button onclick="sendQuickPrompt('아이들이 좋아하는 계란빵과 핫도그 만드는 법 알려줘')" class="w-full text-left text-xs p-2 rounded-lg bg-slate-100 hover:bg-cook-100/70 text-slate-700 hover:text-cook-800 transition flex items-center gap-2">
+            <span>🥖</span>
+            <span class="truncate">초간단 계란빵 & 핫도그</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+      <span>AI Cook Assistant</span>
+      <button onclick="clearChat()" class="hover:text-red-500 transition flex items-center gap-1 font-medium">
+        <i class="fa-solid fa-rotate-right"></i> 대화 초기화
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Chat Container -->
+  <main class="flex-1 flex flex-col h-full bg-slate-100/70 relative overflow-hidden">
+    <!-- Mobile & Top Navbar -->
+    <header class="h-16 bg-white border-b border-slate-200 px-4 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <button onclick="toggleSidebar()" class="md:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100">
+          <i class="fa-solid fa-bars text-lg"></i>
+        </button>
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">👨‍🍳</span>
+          <div>
+            <h2 class="font-bold text-slate-800 text-sm md:text-base leading-tight">쿡봇 레시피 도우미</h2>
+            <p class="text-[11px] text-slate-500">PDF 요리책 기반 멀티모달 RAG 에이전트</p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full font-medium flex items-center gap-1">
+          <i class="fa-solid fa-brain"></i> Qwen3:8b
+        </span>
+        <span class="text-xs px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full font-medium hidden sm:inline-block">
+          BGE-M3 Embeddings
+        </span>
+      </div>
+    </header>
+
+    <!-- Message List Area -->
+    <div id="chatMessages" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+      <!-- Welcome Message -->
+      <div class="flex items-start gap-3.5 max-w-3xl">
+        <div class="w-9 h-9 rounded-full bg-cook-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5">
+          <i class="fa-solid fa-hat-chef text-base"></i>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm p-4 shadow-sm text-sm text-slate-800 space-y-2">
+          <p class="font-semibold text-slate-900 text-base flex items-center gap-1.5">
+            안녕하세요! 레시피 도우미 쿡봇(CookBot)입니다 🍳
+          </p>
+          <p class="text-slate-600 leading-relaxed">
+            등록된 <strong>요리책 레시피북 PDF</strong>에서 정확한 요리법과 <strong>실제 요리 사진</strong>을 찾아 안내해 드릴게요!
+          </p>
+          <div class="pt-2 border-t border-slate-100">
+            <p class="text-xs text-slate-500 font-medium mb-1.5">💡 이런 요리를 물어보세요:</p>
+            <div class="flex flex-wrap gap-1.5">
+              <span onclick="sendQuickPrompt('김 주먹밥 레시피 알려줘')" class="cursor-pointer text-xs bg-slate-100 hover:bg-cook-100 hover:text-cook-700 px-2.5 py-1 rounded-full transition">🍙 김 주먹밥</span>
+              <span onclick="sendQuickPrompt('연두부 샐러드 어떻게 만들어?')" class="cursor-pointer text-xs bg-slate-100 hover:bg-cook-100 hover:text-cook-700 px-2.5 py-1 rounded-full transition">🥗 연두부 샐러드</span>
+              <span onclick="sendQuickPrompt('소고기 미역국 끓이는 법')" class="cursor-pointer text-xs bg-slate-100 hover:bg-cook-100 hover:text-cook-700 px-2.5 py-1 rounded-full transition">🥣 소고기 미역국</span>
+              <span onclick="sendQuickPrompt('참치마요 덮밥 재료와 순서')" class="cursor-pointer text-xs bg-slate-100 hover:bg-cook-100 hover:text-cook-700 px-2.5 py-1 rounded-full transition">🍛 참치마요 덮밥</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <div class="p-4 bg-white border-t border-slate-200 flex-shrink-0">
+      <div class="max-w-4xl mx-auto relative">
+        <form id="chatForm" onsubmit="handleChatSubmit(event)" class="flex items-end gap-2 bg-slate-100 rounded-2xl p-2 border border-slate-300 focus-within:border-cook-500 focus-within:ring-2 focus-within:ring-cook-200 transition">
+          <textarea
+            id="messageInput"
+            rows="1"
+            placeholder="궁금한 요리나 레시피, 재료를 입력하세요 (예: 김치찌개 레시피와 사진 보여줘)"
+            class="flex-1 bg-transparent px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none resize-none max-h-36"
+            onkeydown="handleKeyDown(event)"
+            oninput="autoResize(this)"
+          ></textarea>
+          <button
+            type="submit"
+            id="sendBtn"
+            class="w-10 h-10 rounded-xl bg-cook-600 hover:bg-cook-700 text-white flex items-center justify-center flex-shrink-0 transition shadow-sm hover:shadow"
+          >
+            <i class="fa-solid fa-paper-plane text-sm"></i>
+          </button>
+        </form>
+        <p class="text-[11px] text-center text-slate-400 mt-2">
+          쿡봇은 cook_pdf 문서의 레시피를 기반으로 답변하며 관련 요리 사진을 함께 제공합니다.
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Image Lightbox Modal -->
+  <div id="imageModal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm" onclick="closeImageModal()">
+    <div class="max-w-4xl max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl relative" onclick="event.stopPropagation()">
+      <div class="p-3 bg-slate-900 text-white flex items-center justify-between">
+        <h4 id="modalImageTitle" class="text-xs font-medium text-slate-300 truncate">요리 이미지 원본</h4>
+        <button onclick="closeImageModal()" class="text-slate-400 hover:text-white p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="p-2 flex items-center justify-center bg-slate-950">
+        <img id="modalImage" src="" alt="요리 사진" class="max-h-[75vh] w-auto object-contain rounded-lg">
+      </div>
+    </div>
+  </div>
+
+  <!-- Page Viewer Modal -->
+  <div id="pageModal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm" onclick="closePageModal()">
+    <div class="max-w-3xl w-full max-h-[92vh] bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+      <div class="p-3.5 bg-slate-900 text-white flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-book-open text-cook-500"></i>
+          <h4 id="pageModalTitle" class="text-sm font-semibold text-slate-100">PDF 원본 페이지</h4>
+        </div>
+        <button onclick="closePageModal()" class="text-slate-400 hover:text-white p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="flex-1 overflow-auto p-4 bg-slate-800 flex items-center justify-center">
+        <img id="pageModalImage" src="" alt="PDF 페이지" class="max-h-full max-w-full shadow-lg rounded object-contain">
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync Progress Modal -->
+  <div id="syncModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="max-w-md w-full bg-white rounded-2xl overflow-hidden shadow-2xl p-6 text-center space-y-4">
+      <div id="syncSpinnerBox" class="w-16 h-16 rounded-full bg-cook-100 text-cook-600 flex items-center justify-center mx-auto text-2xl shadow-inner">
+        <i id="syncModalIcon" class="fa-solid fa-arrows-rotate animate-spin"></i>
+      </div>
+      <div>
+        <h3 id="syncModalTitle" class="text-base font-bold text-slate-800">요리책 동기화 진행 중</h3>
+        <p id="syncModalMsg" class="text-xs text-slate-500 mt-1 leading-relaxed">새 PDF를 감지하여 이미지 추출 및 벡터 DB를 구축하고 있습니다...</p>
+      </div>
+      <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+        <div id="syncProgressBar" class="bg-cook-500 h-2 rounded-full w-1/3 transition-all duration-300"></div>
+      </div>
+      <p class="text-[11px] text-slate-400">PDF 용량에 따라 약 10~30초 소요될 수 있습니다.</p>
+    </div>
+  </div>
+
+  <script>
+    const chatMessages = document.getElementById('chatMessages');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    let isProcessing = false;
+    let chatHistory = [];
+
+    function autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+    }
+
+    function handleKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('chatForm').dispatchEvent(new Event('submit'));
+      }
+    }
+
+    function toggleSidebar() {
+      const sb = document.getElementById('sidebar');
+      sb.classList.toggle('hidden');
+    }
+
+    function sendQuickPrompt(promptText) {
+      messageInput.value = promptText;
+      autoResize(messageInput);
+      document.getElementById('chatForm').dispatchEvent(new Event('submit'));
+      if (window.innerWidth < 768) {
+        document.getElementById('sidebar').classList.add('hidden');
+      }
+    }
+
+    function clearChat() {
+      if (confirm('대화 내용을 초기화하시겠습니까?')) {
+        location.reload();
+      }
+    }
+
+    function scrollToBottom() {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Modal Handlers
+    function openImageModal(src, title) {
+      document.getElementById('modalImage').src = src;
+      document.getElementById('modalImageTitle').textContent = title || '요리 사진 미리보기';
+      document.getElementById('imageModal').classList.remove('hidden');
+    }
+
+    function closeImageModal() {
+      document.getElementById('imageModal').classList.add('hidden');
+    }
+
+    function openPageModal(stem, page, sourceName) {
+      const url = `/api/page_image/${encodeURIComponent(stem)}/${page}`;
+      document.getElementById('pageModalTitle').textContent = `📖 ${sourceName} - ${page}페이지 원본`;
+      document.getElementById('pageModalImage').src = url;
+      document.getElementById('pageModal').classList.remove('hidden');
+    }
+
+    function closePageModal() {
+      document.getElementById('pageModal').classList.add('hidden');
+    }
+
+    function showPdfInfo(name, pages, mb) {
+      sendQuickPrompt(`'${name}' 요리책에는 어떤 요리 레시피들이 수록되어 있는지 알려줘`);
+    }
+
+    // Event delegation for images inside markdown
+    chatMessages.addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG' && e.target.closest('.chat-markdown')) {
+        openImageModal(e.target.src, e.target.alt);
+      }
+    });
+
+    async function handleChatSubmit(e) {
+      e.preventDefault();
+      const message = messageInput.value.trim();
+      if (!message || isProcessing) return;
+
+      // Append User Message
+      appendUserMessage(message);
+      chatHistory.push({ role: 'user', content: message });
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+
+      // Append Loading Indicator
+      const loadingId = appendLoadingMessage();
+      isProcessing = true;
+      sendBtn.disabled = true;
+
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: message, history: chatHistory })
+        });
+
+        const data = await response.json();
+        removeLoadingMessage(loadingId);
+
+        if (response.ok) {
+          chatHistory.push({ role: 'assistant', content: data.answer });
+          appendBotMessage(data.answer, data.images, data.sources);
+        } else {
+          appendBotMessage(`⚠️ 오류가 발생했습니다: ${data.error || '알 수 없는 오류'}`);
+        }
+      } catch (err) {
+        removeLoadingMessage(loadingId);
+        appendBotMessage(`⚠️ 서버 통신 오류: ${err.message}`);
+      } finally {
+        isProcessing = false;
+        sendBtn.disabled = false;
+        messageInput.focus();
+      }
+    }
+
+    function appendUserMessage(text) {
+      const div = document.createElement('div');
+      div.className = 'flex items-start justify-end gap-3 max-w-3xl ml-auto';
+      div.innerHTML = `
+        <div class="bg-cook-600 text-white rounded-2xl rounded-tr-sm p-3.5 shadow-sm text-sm leading-relaxed max-w-lg whitespace-pre-wrap">
+          ${escapeHtml(text)}
+        </div>
+        <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center flex-shrink-0 text-xs font-bold">
+          <i class="fa-solid fa-user"></i>
+        </div>
+      `;
+      chatMessages.appendChild(div);
+      scrollToBottom();
+    }
+
+    function appendLoadingMessage() {
+      const id = 'loading_' + Date.now();
+      const div = document.createElement('div');
+      div.id = id;
+      div.className = 'flex items-start gap-3.5 max-w-3xl';
+      div.innerHTML = `
+        <div class="w-9 h-9 rounded-full bg-cook-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5">
+          <i class="fa-solid fa-hat-chef text-base"></i>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm p-4 shadow-sm text-sm text-slate-500 flex items-center gap-3">
+          <div class="flex space-x-1.5">
+            <div class="w-2 h-2 rounded-full bg-cook-500 animate-bounce"></div>
+            <div class="w-2 h-2 rounded-full bg-cook-500 animate-bounce [animation-delay:0.2s]"></div>
+            <div class="w-2 h-2 rounded-full bg-cook-500 animate-bounce [animation-delay:0.4s]"></div>
+          </div>
+          <span>요리책에서 맛있는 레시피와 사진을 찾는 중입니다...</span>
+        </div>
+      `;
+      chatMessages.appendChild(div);
+      scrollToBottom();
+      return id;
+    }
+
+    function removeLoadingMessage(id) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    }
+
+    function appendBotMessage(markdownText, images = [], sources = []) {
+      const div = document.createElement('div');
+      div.className = 'flex items-start gap-3.5 max-w-3xl';
+
+      // Parse markdown
+      const parsedHtml = marked.parse(markdownText || '');
+
+      // Build Image Cards Section
+      let imagesHtml = '';
+      if (images && images.length > 0) {
+        imagesHtml = `
+          <div class="mt-4 pt-3 border-t border-slate-100">
+            <p class="text-xs font-bold text-slate-500 flex items-center gap-1.5 mb-2.5">
+              <i class="fa-solid fa-camera text-cook-600"></i> 요리책 속 조리 & 완성 사진 (${images.length}장)
+            </p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              ${images.map(img => `
+                <div class="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 cursor-pointer shadow-sm hover:shadow transition" onclick="openImageModal('${img.url}', '${img.source} p.${img.page}')">
+                  <img src="${img.url}" alt="${img.filename}" class="w-full h-28 object-cover group-hover:scale-105 transition duration-200">
+                  <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-2">
+                    <span class="text-[10px] text-white font-medium truncate">${img.source} (${img.page}p)</span>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      // Build Sources Section with Page View Link
+      let sourcesHtml = '';
+      if (sources && sources.length > 0) {
+        const uniqueSources = [];
+        const seen = new Set();
+        for (const s of sources) {
+          const key = `${s.source}_${s.page}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueSources.push(s);
+          }
+        }
+
+        sourcesHtml = `
+          <div class="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+            <span class="font-semibold text-slate-600 text-[11px] flex items-center gap-1">
+              <i class="fa-solid fa-book-bookmark text-cook-600"></i> 참고 페이지:
+            </span>
+            ${uniqueSources.map(s => `
+              <button onclick="openPageModal('${s.stem}', ${s.page}, '${s.source}')" class="px-2.5 py-1 bg-slate-100 hover:bg-cook-100 text-slate-700 hover:text-cook-800 rounded-lg text-[11px] font-medium border border-slate-200/80 transition flex items-center gap-1">
+                <span>${s.source} (${s.page}p)</span>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[9px] text-slate-400"></i>
+              </button>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      div.innerHTML = `
+        <div class="w-9 h-9 rounded-full bg-cook-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5">
+          <i class="fa-solid fa-hat-chef text-base"></i>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm p-4 md:p-5 shadow-sm text-sm text-slate-800 flex-1 min-w-0">
+          <div class="chat-markdown prose prose-sm max-w-none">
+            ${parsedHtml}
+          </div>
+          ${imagesHtml}
+          ${sourcesHtml}
+        </div>
+      `;
+
+      chatMessages.appendChild(div);
+      scrollToBottom();
+    }
+
+    function escapeHtml(string) {
+      const entityMap = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      };
+      return String(string).replace(/[&<>"']/g, s => entityMap[s]);
+    }
+
+    // Sync Handler
+    let syncInterval = null;
+
+    async function triggerSync() {
+      if (!confirm("cook_pdf 폴더 내의 새로운 PDF를 감지하여 이미지 추출 및 벡터 DB를 갱신하시겠습니까?")) {
+        return;
+      }
+
+      const syncModal = document.getElementById('syncModal');
+      const syncModalTitle = document.getElementById('syncModalTitle');
+      const syncModalMsg = document.getElementById('syncModalMsg');
+      const syncProgressBar = document.getElementById('syncProgressBar');
+      const syncModalIcon = document.getElementById('syncModalIcon');
+      const syncBtn = document.getElementById('syncBtn');
+
+      syncModal.classList.remove('hidden');
+      syncModalTitle.textContent = "요리책 동기화 시작";
+      syncModalMsg.textContent = "서버에 동기화 요청을 전달하는 중입니다...";
+      syncProgressBar.style.width = "20%";
+      syncBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/sync', { method: 'POST' });
+        const data = await res.json();
+
+        if (!res.ok && data.status !== 'already_running') {
+          alert('동기화 실패: ' + (data.message || '오류 발생'));
+          syncModal.classList.add('hidden');
+          syncBtn.disabled = false;
+          return;
+        }
+
+        // Poll status every 1.5s
+        syncInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch('/api/sync/status');
+            const statusData = await statusRes.json();
+
+            if (statusData.step === 'extracting') {
+              syncModalTitle.textContent = "요리 사진 추출 중";
+              syncModalMsg.textContent = statusData.message || "PDF 내 조리/완성 사진을 추출하고 있습니다...";
+              syncProgressBar.style.width = "45%";
+            } else if (statusData.step === 'embedding') {
+              syncModalTitle.textContent = "벡터 DB 임베딩 갱신 중";
+              syncModalMsg.textContent = statusData.message || "BGE-M3 모델을 통해 벡터 DB를 빌드하고 있습니다...";
+              syncProgressBar.style.width = "85%";
+            } else if (statusData.step === 'done') {
+              clearInterval(syncInterval);
+              syncProgressBar.style.width = "100%";
+              syncModalTitle.textContent = "🎉 동기화 완료!";
+              syncModalMsg.textContent = "새 요리책과 이미지가 성공적으로 반영되었습니다. 화면을 새로고침합니다.";
+              syncModalIcon.className = "fa-solid fa-circle-check text-emerald-500";
+
+              setTimeout(() => {
+                location.reload();
+              }, 1500);
+            } else if (statusData.step === 'error') {
+              clearInterval(syncInterval);
+              syncModalTitle.textContent = "❌ 동기화 실패";
+              syncModalMsg.textContent = statusData.message || "오류가 발생했습니다.";
+              syncModalIcon.className = "fa-solid fa-triangle-exclamation text-red-500";
+              syncProgressBar.classList.add('bg-red-500');
+
+              setTimeout(() => {
+                syncModal.classList.add('hidden');
+                syncBtn.disabled = false;
+              }, 3000);
+            }
+          } catch (pollErr) {
+            console.error("Status polling error:", pollErr);
+          }
+        }, 1500);
+
+      } catch (err) {
+        alert("서버 통신 실패: " + err.message);
+        syncModal.classList.add('hidden');
+        syncBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
